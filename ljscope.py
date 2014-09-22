@@ -23,7 +23,7 @@ class CaptureDevice():
     def __enter__(self):
         self.connect()
         try:
-            self.streamStop()
+            self.device.streamStop()
         except:
             pass
         return self
@@ -40,6 +40,43 @@ class CaptureDevice():
 
     def close(self):
         self.device.close()
+
+
+    def config(self, gainIndex, frequency):
+        self.device.streamConfig(NumChannels=len(self.channels),
+                                 ChannelNumbers=self.channels,
+                                 ChannelOptions=len(self.channels)*[DIFFERENTIAL | gainIndex],
+                                 SampleFrequency=frequency
+                                )
+
+
+    def start(self):
+        self.device.streamStart()
+
+
+    def stop(self):
+        self.device.streamStop()
+
+
+    def fetch(self, channel, numpnts):
+        data = []
+
+        d_iter = self.device.streamData()
+        #while len(data) < numpnts:
+        #    r = d_iter.next()
+        #    if r['missed'] == 0:
+        #        data.extend(r['AIN' + str(channel)])
+        for r in d_iter:
+            if r['missed'] != 0:
+                if len(data) == 0:
+                    continue
+                else:
+                    data.extend((numpnts - len(data)) * [0])
+            else:
+                data.extend(r['AIN' + str(channel)])
+            if len(data) >= numpnts:
+                break
+        return data
 
 
     def acquire(self, gainIndex, frequency, timeout=MAX_TIME):
@@ -120,18 +157,28 @@ class LJScope (wx.Panel):
         
         if self.data:
             dc.Clear()
-            d = self.data[0]
+            dc.SetPen(wx.Pen(wx.BLACK, 1))
+            dc.DrawLine(0, self.h / 2, self.w, self.h / 2)
+            dc.DrawLine(self.w / 2, 0, self.w / 2, self.h)
+
+            dc.SetPen(wx.Pen(wx.RED, 3))
+            #d = self.data[0]
+            d = self.data
 
             y_mean = numpy.mean(d)
-            y_range = max(d) - min(d)
-            x_range = len(d)
+            y_range = float(max(d) - min(d))
+            x_range = float(len(d))
 
-            x_scale = x_range / self.w
-            y_scale = y_range / self.h
+            x_scale = self.w / x_range
+            y_scale = self.h / y_range
 
             for x, y in enumerate(d):
-                dc.DrawPoint(x * x_scale, y_scale * (y - y_mean) + (y_scale / 2))
-            
+                #dc.DrawPoint(x * x_scale,  y_scale * (0.5 * y_range + y - y_mean) )
+                #dc.DrawCheckMark(x * x_scale,  y_scale * (0.5 * y_range + y - y_mean), 12, 12)
+                #dc.CrossHair(x * x_scale,  y_scale * (0.5 * y_range + y - y_mean) )
+                dc.DrawCircle(x * x_scale,  y_scale * (0.5 * y_range + y - y_mean), 1)
+
+            dc.DrawText('RMS %f\n%f to %f' % (y_mean, min(d), max(d)), 12, 12)
 
 
 
@@ -156,13 +203,14 @@ class LJFrame (wx.Frame):
     def generate_data(self):
         with CaptureDevice() as lj:
             print lj
+            lj.config(0, 50000/2)
+            lj.start()
             while not self.shouldExit:
-                lj.acquire(0, 50000, 0.01)
-                self.scope.data = lj.data
+                #lj.acquire(0, 50000, 0.01)
+                self.scope.data = lj.fetch(0, 5000)
                 wx.PostEvent(self.scope, wx.ThreadEvent())
+            lj.stop()
         print ' ... data_thread exiting.'
-
-
 
 
 
